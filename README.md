@@ -9,7 +9,7 @@ In this repo you will find various [Vector Sinks](https://vector.dev/docs/refere
 1. Create a new fly logger app based on our docker image
 
 ```
-fly launch --image ghcr.io/superfly/fly-log-shipper:latest
+fly launch --image flyio/log-shipper:latest --no-public-ips
 ```
 
 2. Set [NATS source secrets](#nats-source-configuration) for your new app
@@ -27,6 +27,7 @@ However for advanced uses you can still configure a NATs client in your apps to 
 | `ACCESS_TOKEN` | Fly personal access token (required; set with `fly secrets set ACCESS_TOKEN=$(fly auth token)`)                  |
 | `SUBJECT`      | Subject to subscribe to. See [[NATS]] below (defaults to `logs.>`)                                               |
 | `QUEUE`        | Arbitrary queue name if you want to run multiple log processes for HA and avoid duplicate messages being shipped |
+| `NETWORK`      | 6PN network, if you want to run log-shipper through a  WireGuard connection (defaults to `fdaa:0:0`)             |
 
 After generating your `fly.toml`, remember to update the internal port to match the `vector` internal port
 defined in `vector-configs/vector.toml`. Not doing so will result in health checks failing on deployment.
@@ -66,11 +67,19 @@ Set the secrets below associated with your desired log destination
 | `AXIOM_TOKEN`   | Axiom token   |
 | `AXIOM_DATASET` | Axiom dataset |
 
+### Baselime
+
+| Secret              | Description                                   |
+|---------------------|-----------------------------------------------|
+| `BASELIME_API_KEY`  | Baselime API key                              |
+| `BASELIME_DATASET`  | (optional) Baselime dataset (default "flyio") |
+
 ### Better Stack Logs (formerly Logtail)
 
-| Secret                      | Description                    |
-|-----------------------------|--------------------------------|
-| `BETTER_STACK_SOURCE_TOKEN` | Better Stack Logs source token |
+| Secret                        | Description                                                               |
+|-------------------------------|---------------------------------------------------------------------------|
+| `BETTER_STACK_SOURCE_TOKEN`   | Better Stack Telemetry source token                                       |
+| `BETTER_STACK_INGESTING_HOST` | Better Stack source ingesting host (default is `in.logs.betterstack.com`) |
 
 ### Datadog
 
@@ -84,6 +93,12 @@ Set the secrets below associated with your desired log destination
 | Secret                 | Description          |
 | ---------------------- | -------------------- |
 | `HIGHLIGHT_PROJECT_ID` | Highlight Project ID |
+
+### Honeybadger
+
+| Secret                | Description         |
+| --------------------- | ------------------- |
+| `HONEYBADGER_API_KEY` | Honeybadger API key |
 
 ### Honeycomb
 
@@ -137,6 +152,14 @@ One of these is required for New Relic logs. New Relic recommend the license key
 | `NEW_RELIC_REGION`      | (optional) eu or us (default us) |
 | `NEW_RELIC_ACCOUNT_ID`  | New Relic Account Id             |
 
+### OpsVerse
+
+| Secret                  | Description            |
+| ----------------------- | ---------------------- |
+| `OPSVERSE_LOGS_ENDPOINT`| OpsVerse Logs Endpoint |
+| `OPSVERSE_USERNAME`     | OpsVerse Username      |
+| `OPSVERSE_PASSWORD`     | OpsVerse Password      |
+
 ### Papertrail
 
 | Secret                | Description         |
@@ -150,6 +173,14 @@ One of these is required for New Relic logs. New Relic recommend the license key
 | ----------------- | --------------- |
 | `SEMATEXT_REGION` | Sematext region |
 | `SEMATEXT_TOKEN`  | Sematext token  |
+
+
+### Signoz
+
+| Secret                | Description                                                     |
+| --------------------- | --------------------------------------------------------------- |
+| `SIGNOZ_INGESTION_KEY`| Signoz Access Token                                             |
+| `SIGNOZ_URI`       | Signoz URI (default is 'https://ingest.us.signoz.cloud/logs/vector') |
 
 ### Uptrace
 
