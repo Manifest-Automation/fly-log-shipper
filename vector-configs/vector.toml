@@ -23,6 +23,14 @@ auth.strategy = 'bearer'
 auth.token = '${ACCESS_TOKEN}'
 query.match = ['{app="manifest-admin"}']
 
+# Define the source for your first app
+[sources.manifest_agents_app]
+type = "prometheus_scrape"
+endpoints = [ "https://api.fly.io/prometheus/manifest-automation/federate" ]
+auth.strategy = 'bearer'
+auth.token = '${ACCESS_TOKEN}'
+query.match = ['{app="manifest-agents"}']
+
 # Define the source for your second app
 [sources.manifest_fast_sockets_app]
 type = "prometheus_scrape"
@@ -42,7 +50,7 @@ query.match = ['{app="manifest-ssh"}']
 # Update the sinks block to include all the source names
 [sinks.datadog_metrics]
 type = "datadog_metrics"
-inputs = [ "manifest_admin_app", "manifest_fast_sockets_app" ]  # Include all source names here
+inputs = [ "manifest_admin_app", "manifest_fast_sockets_app", "manifest_agents_app"]  # Include all source names here
 default_api_key = "${DATADOG_API_KEY}"
 default_namespace = "manifest"
 site = "us5.datadoghq.com"
