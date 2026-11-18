@@ -8,8 +8,6 @@ primary_region = "sjc"
 
 [env]
   ORG="manifest-automation"
-  # Labels every line deployment_environment="production" in Loki (vector-configs/vector.toml)
-  DEPLOYMENT_ENVIRONMENT="production"
   # Tailscale tag (start-fly-log-transporter.sh): the tailnet policy lets it reach the Grafana LGTM stack's OTLP port.
   # Borrows the apps' production tag.
   TS_ADVERTISE_TAG="tag:fly-app-prd"
