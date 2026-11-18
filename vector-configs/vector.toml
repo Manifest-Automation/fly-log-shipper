@@ -1,9 +1,26 @@
+# Fly logs (every app's stdout/stderr and Fly's own events about its machines) for the organisation, from Fly's NATS
+# server, to the self-hosted Grafana LGTM stack's Loki over OTLP (manifest_infrastructure docs/observability/README.md).
+#
+# The apps ship their own log records to Loki over OTLP already, and print them on stdout as JSON (or, Magic Max and
+# Manifest Agents, a second time in the OpenTelemetry plain format): those lines are left out here. What goes is what
+# Loki would otherwise miss: Fly's events (machine exits, OOM kills, health checks), tailscaled, gunicorn/uvicorn's own
+# lines, the start scripts, release commands and crash tracebacks. In Loki: service_name="fly", service_namespace of
+# the app's product, deployment_environment, service_instance_id = the Fly machine, and the fly.* attributes as
+# structured metadata. No severity, so these lines never count toward the error alerts.
+
 [api]
   enabled = true
   address = "[::]:8686"
 
+# Vector's own metrics, on :9598 (fly.toml [metrics])
 [sources.fly_log_metrics]
   type = "internal_metrics"
+
+[sinks.fly_log_metrics_prometheus]
+  type = "prometheus_exporter"
+  inputs = ["fly_log_metrics"]
+  address = "[::]:9598"
+  default_namespace = "fly-logs"
 
 [sources.nats]
   type = "nats"
@@ -15,69 +32,95 @@
   auth.user_password.password = "${ACCESS_TOKEN?}"
   connection_name = "Fly logs stream"
 
-# Define the source for your first app
-[sources.manifest_admin_app]
-type = "prometheus_scrape"
-endpoints = [ "https://api.fly.io/prometheus/manifest-automation/federate" ]
-auth.strategy = 'bearer'
-auth.token = '${ACCESS_TOKEN}'
-query.match = ['{app="manifest-admin"}']
-
-# Define the source for your first app
-[sources.manifest_agents_app]
-type = "prometheus_scrape"
-endpoints = [ "https://api.fly.io/prometheus/manifest-automation/federate" ]
-auth.strategy = 'bearer'
-auth.token = '${ACCESS_TOKEN}'
-query.match = ['{app="manifest-agents"}']
-
-# Define the source for your first app
-[sources.magic_santa_app]
-type = "prometheus_scrape"
-endpoints = [ "https://api.fly.io/prometheus/manifest-automation/federate" ]
-auth.strategy = 'bearer'
-auth.token = '${ACCESS_TOKEN}'
-query.match = ['{app="magic-santa"}']
-
-# Define the source for your second app
-[sources.manifest_fast_sockets_app]
-type = "prometheus_scrape"
-endpoints = [ "https://api.fly.io/prometheus/manifest-automation/federate" ]
-auth.strategy = 'bearer'
-auth.token = '${ACCESS_TOKEN}'
-query.match = ['{app="manifest-fast-sockets"}']
-
-# Define the source for your second app
-[sources.manifest_ssh_app]
-type = "prometheus_scrape"
-endpoints = [ "https://api.fly.io/prometheus/manifest-automation/federate" ]
-auth.strategy = 'bearer'
-auth.token = '${ACCESS_TOKEN}'
-query.match = ['{app="manifest-ssh"}']
-
-# Update the sinks block to include all the source names
-[sinks.datadog_metrics]
-type = "datadog_metrics"
-inputs = [ "manifest_admin_app", "manifest_fast_sockets_app", "manifest_agents_app", "magic_santa_app"]  # Include all source names here
-default_api_key = "${DATADOG_API_KEY}"
-default_namespace = "manifest"
-site = "us5.datadoghq.com"
-
-
+# Each NATS message is a Fly log event as JSON: {event.provider, fly.app.{name,instance,process_group}, fly.region,
+# host, log.level, message, timestamp}
 [transforms.log_json]
   type = "remap"
   inputs = ["nats"]
+  drop_on_error = true
   source = '''
   . = parse_json!(.message)
   '''
 
-[sinks.fly_log_metrics_prometheus]
-  type = "prometheus_exporter" # required
-  inputs = ["fly_log_metrics"] # required
-  address = "[::]:9598" # required
-  default_namespace = "fly-logs" # optional, no default
-
-[sinks.blackhole]
-  type = "blackhole"
+[transforms.not_already_in_loki]
+  type = "filter"
   inputs = ["log_json"]
-  print_interval_secs = 100000
+  condition = '''
+  app = to_string(.fly.app.name) ?? ""
+  provider = to_string(.event.provider) ?? ""
+  message = to_string(.message) ?? ""
+  if app == "manifest-log-shipper" {
+    false
+  } else if provider != "app" {
+    true
+  } else {
+    !(starts_with(strip_whitespace(message), "{") ||
+      (contains(message, "[trace_id=") && contains(message, "resource.service.name=")))
+  }
+  '''
+
+[transforms.otlp]
+  type = "remap"
+  inputs = ["not_already_in_loki"]
+  source = '''
+  app = to_string(.fly.app.name) ?? ""
+  namespace = if app == "crosstalk-prod" || app == "crosstalk-staging" || app == "manifest-fast-sockets" || app == "manifest-fast-sockets-staging" {
+    "crosstalk"
+  } else if app == "magic-santa" || app == "magic-santa-staging" {
+    "magic-santa"
+  } else if app == "magic-max-production" || app == "magic-max-staging" {
+    "magic-max"
+  } else if app == "manifest-agents" || app == "manifest-agents-staging" {
+    "manifest"
+  } else {
+    "fly"
+  }
+  instance = to_string(.fly.app.instance) ?? ""
+  if instance == "" { instance = to_string(.host) ?? "unknown" }
+  time = parse_timestamp(to_string(.timestamp) ?? "", format: "%+") ?? now()
+  nanos = to_unix_timestamp(time, unit: "nanoseconds") ?? 0
+  environment = get_env_var("DEPLOYMENT_ENVIRONMENT") ?? "production"
+  body = to_string(.message) ?? ""
+  attributes = [
+    {"key": "fly.app.name", "value": {"stringValue": app}},
+    {"key": "fly.process_group", "value": {"stringValue": to_string(.fly.app.process_group) ?? ""}},
+    {"key": "fly.region", "value": {"stringValue": to_string(.fly.region) ?? ""}},
+    {"key": "fly.event.provider", "value": {"stringValue": to_string(.event.provider) ?? ""}},
+    {"key": "fly.log.level", "value": {"stringValue": to_string(.log.level) ?? ""}}
+  ]
+  . = {
+    "resourceLogs": [{
+      "resource": {"attributes": [
+        {"key": "service.name", "value": {"stringValue": "fly"}},
+        {"key": "service.namespace", "value": {"stringValue": namespace}},
+        {"key": "deployment.environment", "value": {"stringValue": environment}},
+        {"key": "service.instance.id", "value": {"stringValue": instance}}
+      ]},
+      "scopeLogs": [{
+        "scope": {"name": "fly-log-shipper"},
+        "logRecords": [{
+          "timeUnixNano": nanos,
+          "body": {"stringValue": body},
+          "attributes": attributes
+        }]
+      }]
+    }]
+  }
+  '''
+
+# The LGTM stack's OTLP/HTTP receiver, on the tailnet (start-fly-log-transporter.sh joins it and waits for this host
+# and port, read from the uri line below). Protobuf, batched. A collector that is down drops lines rather than backing
+# up into the NATS subscription.
+[sinks.loki]
+  type = "opentelemetry"
+  inputs = ["otlp"]
+  protocol.type = "http"
+  protocol.uri = "http://100.112.89.83:4318/v1/logs"
+  protocol.method = "post"
+  protocol.encoding.codec = "otlp"
+  protocol.batch.max_events = 1000
+  protocol.batch.timeout_secs = 2
+  protocol.request.timeout_secs = 30
+  buffer.type = "memory"
+  buffer.max_events = 20000
+  buffer.when_full = "drop_newest"
