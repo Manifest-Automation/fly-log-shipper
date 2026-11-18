@@ -1,0 +1,99 @@
+# vector test vector-configs/vector.toml tests/vector_test.toml (see README)
+
+[[tests]]
+  name = "a tailscaled line from crosstalk-prod goes, as OTLP, under crosstalk"
+  [[tests.inputs]]
+    insert_at = "not_already_in_loki"
+    type = "log"
+    [tests.inputs.log_fields]
+      "event.provider" = "app"
+      "fly.app.name" = "crosstalk-prod"
+      "fly.app.instance" = "2870de5cd301d8"
+      "fly.app.process_group" = "web"
+      "fly.region" = "iad"
+      "log.level" = "info"
+      message = "2026/11/18 05:41:29 magicsock: new contact: peer=[f0hzz] via=derp"
+      timestamp = "2026-11-18T05:41:29.417351911Z"
+  [[tests.outputs]]
+    extract_from = "otlp"
+    [[tests.outputs.conditions]]
+      type = "vrl"
+      source = '''
+      r = .resourceLogs[0]
+      attrs = r.resource.attributes
+      assert_eq!(attrs[0].value.stringValue, "fly")
+      assert_eq!(attrs[1].value.stringValue, "crosstalk")
+      assert_eq!(attrs[3].value.stringValue, "2870de5cd301d8")
+      rec = r.scopeLogs[0].logRecords[0]
+      assert_eq!(rec.body.stringValue, "2026/11/18 05:41:29 magicsock: new contact: peer=[f0hzz] via=derp")
+      assert_eq!(rec.timeUnixNano, 1794980489417351911)
+      assert_eq!(rec.attributes[1].value.stringValue, "web")
+      assert!(!exists(rec.severityText))
+      '''
+
+[[tests]]
+  name = "a Fly platform event goes, whatever its text"
+  [[tests.inputs]]
+    insert_at = "not_already_in_loki"
+    type = "log"
+    [tests.inputs.log_fields]
+      "event.provider" = "runner"
+      "fly.app.name" = "magic-santa"
+      message = "{\"looks\": \"like json but it is a platform event\"}"
+  [[tests.outputs]]
+    extract_from = "otlp"
+    [[tests.outputs.conditions]]
+      type = "vrl"
+      source = '''
+      assert_eq!(.resourceLogs[0].resource.attributes[1].value.stringValue, "magic-santa")
+      '''
+
+[[tests]]
+  name = "the apps' JSON lines stay out (already in Loki over OTLP)"
+  no_outputs_from = ["not_already_in_loki"]
+  [[tests.inputs]]
+    insert_at = "not_already_in_loki"
+    type = "log"
+    [tests.inputs.log_fields]
+      "event.provider" = "app"
+      "fly.app.name" = "magic-max-production"
+      message = "{\"asctime\": \"2026-11-18 05:41:29,417\", \"levelname\": \"INFO\"}"
+
+[[tests]]
+  name = "the OpenTelemetry plain-format duplicates stay out"
+  no_outputs_from = ["not_already_in_loki"]
+  [[tests.inputs]]
+    insert_at = "not_already_in_loki"
+    type = "log"
+    [tests.inputs.log_fields]
+      "event.provider" = "app"
+      "fly.app.name" = "magic-max-production"
+      message = "2026-11-18 05:41:29,417 WARNING [django.request] [log.py:253] [trace_id=8b9c span_id=0 resource.service.name=app trace_sampled=True] - Not Found: /x"
+
+[[tests]]
+  name = "the shipper's own lines stay out"
+  no_outputs_from = ["not_already_in_loki"]
+  [[tests.inputs]]
+    insert_at = "not_already_in_loki"
+    type = "log"
+    [tests.inputs.log_fields]
+      "event.provider" = "app"
+      "fly.app.name" = "manifest-log-shipper"
+      message = "vector started"
+
+[[tests]]
+  name = "an app outside the four products goes under fly"
+  [[tests.inputs]]
+    insert_at = "not_already_in_loki"
+    type = "log"
+    [tests.inputs.log_fields]
+      "event.provider" = "app"
+      "fly.app.name" = "something-new"
+      message = "Traceback (most recent call last):"
+  [[tests.outputs]]
+    extract_from = "otlp"
+    [[tests.outputs.conditions]]
+      type = "vrl"
+      source = '''
+      assert_eq!(.resourceLogs[0].resource.attributes[1].value.stringValue, "fly")
+      '''
