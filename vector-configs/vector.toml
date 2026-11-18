@@ -22,14 +22,21 @@
   address = "[::]:9598"
   default_namespace = "fly-logs"
 
+# Vector (0.61) no longer expands environment variables in its configuration, so the settings are written out here and
+# the one secret, the Fly token NATS takes as the password (Fly secret ACCESS_TOKEN), comes from a file
+# start-fly-log-transporter.sh writes
+[secret.fly]
+  type = "directory"
+  path = "/run/vector-secrets"
+
+# Fly's NATS server for the organisation's logs, on the 6PN network
 [sources.nats]
   type = "nats"
-  url = "nats://[${NETWORK-fdaa}::3]:4223"
-  queue = "${QUEUE-}"
-  subject = "${SUBJECT-logs.>}"
+  url = "nats://[fdaa::3]:4223"
+  subject = "logs.>"
   auth.strategy = "user_password"
-  auth.user_password.user = "${ORG-personal}"
-  auth.user_password.password = "${ACCESS_TOKEN?}"
+  auth.user_password.user = "manifest-automation"
+  auth.user_password.password = "SECRET[fly.access_token]"
   connection_name = "Fly logs stream"
 
 # Each NATS message is a Fly log event as JSON: {event.provider, fly.app.{name,instance,process_group}, fly.region,
@@ -79,7 +86,6 @@
   if instance == "" { instance = to_string(.host) ?? "unknown" }
   time = parse_timestamp(to_string(.timestamp) ?? "", format: "%+") ?? now()
   nanos = to_unix_timestamp(time, unit: "nanoseconds") ?? 0
-  environment = get_env_var("DEPLOYMENT_ENVIRONMENT") ?? "production"
   body = to_string(.message) ?? ""
   attributes = [
     {"key": "fly.app.name", "value": {"stringValue": app}},
@@ -93,7 +99,7 @@
       "resource": {"attributes": [
         {"key": "service.name", "value": {"stringValue": "fly"}},
         {"key": "service.namespace", "value": {"stringValue": namespace}},
-        {"key": "deployment.environment", "value": {"stringValue": environment}},
+        {"key": "deployment.environment", "value": {"stringValue": "production"}},
         {"key": "service.instance.id", "value": {"stringValue": instance}}
       ]},
       "scopeLogs": [{

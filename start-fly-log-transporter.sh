@@ -96,9 +96,14 @@ wait_for_endpoint() {
   return 1
 }
 
+[[ -n "${ACCESS_TOKEN:-}" ]] || fail "ACCESS_TOKEN (Fly secret, the NATS password) unset"
 join_tailnet || fail "could not join the tailnet"
 wait_for_endpoint || fail "OTLP endpoint ${OTLP_ENDPOINT} not reachable after 120s"
-# Only tailscaled needs the OAuth client
-unset TS_OAUTH_CLIENT_ID TS_OAUTH_CLIENT_SECRET
+
+# Vector reads its one secret from a file (vector.toml [secret.fly]); nothing else needs the OAuth client or the token
+mkdir -p /run/vector-secrets
+chmod 700 /run/vector-secrets
+( umask 077; printf '%s' "$ACCESS_TOKEN" > /run/vector-secrets/access_token )
+unset TS_OAUTH_CLIENT_ID TS_OAUTH_CLIENT_SECRET ACCESS_TOKEN
 
 exec vector -c "$VECTOR_CONFIG"

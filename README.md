@@ -27,20 +27,22 @@ crashes: `{service_namespace="crosstalk", service_name="fly"} | fly_event_provid
 
 | | |
 |---|---|
-| `ORG` | Organisation slug (fly.toml) |
-| `ACCESS_TOKEN` | Fly token for the NATS source (secret) |
+| `ACCESS_TOKEN` | Fly token for the NATS source (secret); the start script hands it to Vector as a file (`/run/vector-secrets`) |
 | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_CLIENT_SECRET` | The shared Tailscale OAuth client (secrets; AWS Secrets Manager `manifest-agents-prd-tailscale-oauth`) |
 | `TS_ADVERTISE_TAG` | Tailscale tag (fly.toml) |
-| `DEPLOYMENT_ENVIRONMENT` | `deployment_environment` label (fly.toml) |
-| `SUBJECT`, `QUEUE`, `NETWORK` | Optional NATS settings, as upstream (`logs.>`, none, `fdaa`) |
+
+Vector 0.61 does not expand environment variables in its configuration (only with
+`--dangerously-allow-env-var-interpolation`), so the organisation (`manifest-automation`), the NATS address and subject,
+the OTLP endpoint and `deployment_environment="production"` are written out in `vector-configs/vector.toml`.
 
 Vector's own metrics are on `:9598/metrics` (fly.toml `[metrics]`).
 
 ## Changing it
 
 ```
-docker run --rm -v $PWD:/w -w /w -e ACCESS_TOKEN=x timberio/vector:<version>-debian validate --no-environment vector-configs/vector.toml
-docker run --rm -v $PWD:/w -w /w -e ACCESS_TOKEN=x timberio/vector:<version>-debian test vector-configs/vector.toml tests/vector_test.toml
+mkdir -p /tmp/vs && printf x > /tmp/vs/access_token
+docker run --rm -v $PWD:/w -w /w -v /tmp/vs:/run/vector-secrets timberio/vector:<version>-debian validate --no-environment vector-configs/vector.toml
+docker run --rm -v $PWD:/w -w /w -v /tmp/vs:/run/vector-secrets timberio/vector:<version>-debian test vector-configs/vector.toml tests/vector_test.toml
 fly deploy -a manifest-log-shipper
 ```
 
